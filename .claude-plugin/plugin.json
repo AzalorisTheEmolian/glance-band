@@ -9,6 +9,9 @@
   "license": "MIT",
   "keywords": ["status", "background-tasks", "questions", "band", "at-a-glance"],
   "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/AzalorisTheEmolian/glance-band#readme",
+  "supportUrl": "https://github.com/AzalorisTheEmolian/glance-band/issues",
+  "privacyPolicyUrl": "https://github.com/AzalorisTheEmolian/glance-band#your-data-what-it-reads-holds-causes-to-be-stored-and-what-leaves-your-computer",
   "types": "./types/index.d.ts",
   "userConfig": {
     "questions_file": {
