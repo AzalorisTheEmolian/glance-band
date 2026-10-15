@@ -13,7 +13,17 @@ questions is waiting for your answer.
   (`/loop`, CronCreate, wakeups). **Blue** while anything runs, **grey** at zero, **lilac** when the only thing running
   is a loop. A grey note says what is running: `(1 task, 1 scheduled)` or `(loop)`.
 - **N commands running** - shell commands (Bash, PowerShell) running right now. **Green** while any run.
-- **writing a command** - **brown**, while Claude is still writing a shell command and before it runs. Shown only then.
+- **What Claude is writing** - **brown**, from the moment Claude starts writing a call until it runs. Shown only then:
+  - **writing a command** - a shell command;
+  - **creating a file** - a whole new file;
+  - **rewriting a file** - a whole file that replaces one already on disk (the band tells the two apart as soon as the
+    file's name streams in, a split second after the label appears);
+  - **editing a file** - a change to part of a file; **making N edits** when several wait together (they may all be
+    to one file).
+
+  Each kind is counted on its own and they share one line, joined by a dot. Claude Code sometimes runs each call as
+  soon as it is written and sometimes holds several until the last is written, so you may see one label or several.
+  Reading a file is not shown: it is over in a blink.
 - **Hide / Show** - folds the band down to a single button (or type `/band`).
 
 **Row 2 - your turn**
@@ -79,18 +89,23 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
 | `command.run` for `/band` | Answers the plugin's own `/band` command: folds or unfolds the band | Only its own command |
 | `prompt.compose` | With `teach_claude` on, adds ONE section at the end of Claude's system prompt: the note asking Claude to keep the questions file (its text is in `hooks/register.tsx`, `QUESTIONS_NOTE`). Every other section passes through untouched | Adds that one section; nothing else |
 | `classic.Stop` | At each turn's end, reads the session's in-flight background tasks and scheduled jobs to set the counts | No |
-| `turn.step` | Watches Claude's reply as it streams, to notice a shell command being written; every piece passes through unchanged | No |
-| `tool.call` | Counts a shell command while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
+| `turn.step` | Watches Claude's reply as it streams, to notice a shell command, a file or an edit being written; for a whole-file write it reads the file's name from the streamed arguments and asks only whether that path already exists. Every piece passes through unchanged | No |
+| `tool.call` | Ends a "being written" label when its call starts; counts a shell command while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
 | `ui.render` for the band above the prompt | Draws the band | Draws its own band only |
 
 ## Your data: what it reads, holds, causes to be stored, and what leaves your computer
 
 - **Reads, keeps nothing from:** the session's own events; the output files of running background shells (only their
-  last line, to see when one ends); the `HOME` and `USERPROFILE` environment variables (only to find your home folder).
+  last line, to see when one ends); the `HOME` and `USERPROFILE` environment variables (only to find your home folder);
+  and, when Claude writes a whole file, **whether that file's path already exists** - a yes or no from your disk, to
+  choose between "creating" and "rewriting"; the file itself is never opened or read.
 - **Holds for the session only:** the counts, the IDs of running shells and their output files' paths, and **the text
   of your open questions** - in Claude Code's session memory, gone when the session ends (it survives only a reload of
   the plugin). Glance Band uses no persistent plugin storage. Note: Claude Code lets any other plugin in the same
   session read these values.
+- **Holds for a moment only:** while Claude starts writing a whole file, the first streamed pieces of that call's
+  arguments, in the plugin's own memory, until the file's name can be read from them (in practice the name comes
+  first, so this is the name itself) - then dropped; nothing of them is kept, shown or sent.
 - **Causes storage - one file on your disk:** with `teach_claude` on (the default), Glance Band asks Claude to write
   each question it puts to you into the questions file (by default `<home>/.claude/questions_waiting.md`). The plugin's
   own code writes nothing, but that file exists because of it, holds whatever your questions say, and **stays until
@@ -108,6 +123,10 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
   plain text beside small buttons, not coloured buttons.
 - Mods (function hooks) are an early-access API; a later Claude Code release may change what the band can do.
 - Anything the band cannot hear between turn ends is corrected at the next turn's end.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

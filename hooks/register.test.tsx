@@ -256,6 +256,88 @@ test('writing a command: brown from its first streamed piece until it runs, its 
   await ui.unmount()
 })
 
+// Claude Code sometimes runs a call as soon as it is written and sometimes holds several of one reply until the last
+// is written; the harness runs no call while a reply is still being written, so the held state is handed to it whole:
+// the reply's pieces first, then the calls
+test('creating, rewriting and editing: each kind counted, all on one line, the same brown, a command running beside them', async ($, on) => {
+  const during: string[][] = []
+  const asked: string[] = []
+  const texts = async () => {
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    const t = (await ui.findAll({ type: 'Text' })).map(x => String(x.text))
+    await ui.unmount()
+    return t
+  }
+  on('classic.Stop', async () => ({}))
+  // one file already exists: C:\x\old.txt (its name arrives JSON-escaped, and in two pieces)
+  on('fs.exists', async (_$, e) => {
+    const p = String((e as { path?: string }).path)
+    asked.push(p)
+    return { value: p === 'C:\\x\\old.txt' }
+  })
+  on('tool.call', async (_$, e) => {
+    if ((e as { tool?: string }).tool === 'Bash') {
+      during.push(await texts())  // the band while the command runs
+    }
+    return { result: {}, text: 'done' }
+  })
+  on('turn.step', async function* () {
+    yield { kind: 'tool', index: 0, id: 'c1', name: 'Bash' }
+    yield { kind: 'tool', index: 1, id: 'w1', name: 'Write' }
+    yield { kind: 'input', index: 1, json: '{"file_path": "C:\\\\x\\\\new.txt", "content": "x"}' }
+    yield { kind: 'tool', index: 2, id: 'w2', name: 'Write' }
+    yield { kind: 'input', index: 2, json: '{"file_pa' }
+    yield { kind: 'input', index: 2, json: 'th": "C:\\\\x\\\\old.txt", "content": "y"}' }
+    yield { kind: 'tool', index: 3, id: 'e1', name: 'Edit' }
+    yield { kind: 'tool', index: 4, id: 'e2', name: 'Edit' }
+    yield { kind: 'tool', index: 5, id: 'e3', name: 'Edit' }
+    yield { kind: 'tool', index: 6, id: 'r1', name: 'Read' }
+    yield { kind: 'stop', stopReason: 'tool_use', usage: null }
+    return { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage: null }
+  })
+
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
+  const stream = $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 1 })
+  let r = await stream.next()
+  while (!r.done) {
+    r = await stream.next()
+  }
+  // all held: a command, a new file, an existing file and three edits - one line; reading never shown
+  expect(asked).toEqual(['C:\\x\\new.txt', 'C:\\x\\old.txt'])
+  const held = await texts()
+  expect(held).toContain('writing a command')
+  expect(held).toContain('creating a file')
+  expect(held).toContain('rewriting a file')
+  expect(held).toContain('making 3 edits')
+  expect(held.some(t => /reading|editing 3/.test(t))).toBe(false)
+  expect(held).not.toContain('writing a file')
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find({ type: 'Text', text: 'creating a file' }))?.props.color).toBe('#9C6644')
+  expect((await ui.find({ type: 'Text', text: 'rewriting a file' }))?.props.color).toBe('#9C6644')
+  expect((await ui.find({ type: 'Text', text: 'making 3 edits' }))?.props.color).toBe('#9C6644')
+  expect((await ui.findAll({ type: 'Text', text: '·' })).length).toBe(5)
+  await ui.unmount()
+
+  // the command runs: "1 command running" beside the files and the edits still being written, its own label gone
+  await $.tool.call({ tool: 'Bash', command: 'sleep 4', tool_use_id: 'c1' } as never)
+  expect(during[0]).toContain('1 command running')
+  expect(during[0]).toContain('creating a file')
+  expect(during[0]).toContain('rewriting a file')
+  expect(during[0]).toContain('making 3 edits')
+  expect(during[0].some(t => /writing a command/.test(t))).toBe(false)
+
+  // each goes as it runs: the two files, then two edits - one edit left reads "editing a file"
+  await $.tool.call({ tool: 'Write', file_path: 'C:\\x\\new.txt', content: 'x', tool_use_id: 'w1' } as never)
+  await $.tool.call({ tool: 'Write', file_path: 'C:\\x\\old.txt', content: 'y', tool_use_id: 'w2' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: 'a.txt', old_string: 'x', new_string: 'y', tool_use_id: 'e1' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: 'a.txt', old_string: 'y', new_string: 'z', tool_use_id: 'e2' } as never)
+  const one = await texts()
+  expect(one).toContain('editing a file')
+  expect(one.some(t => /creating|rewriting|edits/.test(t))).toBe(false)
+  await $.tool.call({ tool: 'Edit', file_path: 'a.txt', old_string: 'z', new_string: 'w', tool_use_id: 'e3' } as never)
+  expect((await texts()).some(t => /writing|creating|editing|edits/.test(t))).toBe(false)
+})
+
 const QTEXT = [
   '# Questions waiting',
   '- [ ] 2026-10-14 20:30 · the release · ship today or tomorrow?',

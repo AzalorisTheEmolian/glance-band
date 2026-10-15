@@ -8,7 +8,9 @@ import type { Counts, Watched } from '../types'
 //
 // Row 1: the session's background work and scheduled loops - "N background tasks running", blue while any run, grey at
 // zero, lilac when the only thing running is a loop - then the shell commands running right now (green while any run)
-// and "writing a command" (brown) while Claude is still writing one; Hide folds the band down to its Show button.
+// and, in brown, what Claude is still writing: "writing a command", "creating a file" ("rewriting a file" once its name
+// turns out to be a file that already exists), "editing a file" ("making N edits" for several); Hide folds the band
+// down to its Show button.
 // Row 2: "N questions waiting" - white at zero, a calm yellow from one - counted from ONE Markdown file, with a List
 // button that unfolds the open questions under it.
 //
@@ -25,10 +27,22 @@ const dir = atom({ plugin: 'glance-band', key: 'dir' } as const, null)
 const running = atom({ plugin: 'glance-band', key: 'running' } as const, 0)
 const hidden = atom({ plugin: 'glance-band', key: 'hidden' } as const, false)
 const writing = atom({ plugin: 'glance-band', key: 'writing' } as const, 0)
-const questions = atom({ plugin: 'glance-band', key: 'questions' } as const, [])
+const creatingFiles = atom({ plugin: 'glance-band', key: 'creatingFiles' } as const, 0)
+const rewritingFiles = atom({ plugin: 'glance-band', key: 'rewritingFiles' } as const, 0)
+const editingFiles = atom({ plugin: 'glance-band', key: 'editingFiles' } as const, 0)
+const questions =atom({ plugin: 'glance-band', key: 'questions' } as const, [])
 const showQuestions = atom({ plugin: 'glance-band', key: 'showQuestions' } as const, false)
 
 const COMMANDS = ['Bash', 'PowerShell']
+// WHAT IS BEING WRITTEN, from a call's first streamed piece until Claude Code runs it: a command, a whole file (a new
+// one, or one that already exists - decided once the file's name streams in), or an edit; reading is left out (a read
+// is a file name and runs in a blink). Each kind is counted on its own: Claude Code sometimes holds several calls of
+// one reply until the last is written, and sometimes runs each as soon as it is written.
+type Kind = 'command' | 'create' | 'rewrite' | 'edit'
+const WRITTEN = new Map<string, Kind>([
+  ['Bash', 'command'], ['PowerShell', 'command'], ['Write', 'create'], ['Edit', 'edit'], ['NotebookEdit', 'edit'],
+])
+const FILE_PATH = /"file_path"\s*:\s*"((?:[^"\\]|\\.)*)"/
 // work that runs in the background with no output file to watch: it counts at its launch and leaves at a turn's end
 const BACKGROUND_TOOLS = ['Workflow', 'Monitor']
 const ENDED = ['completed', 'failed', 'killed', 'stopped', 'cancelled']
@@ -72,7 +86,9 @@ const QUESTIONS_NOTE = (path: string) =>
 const seen = new Map<string, number>()
 let ticking = false
 let questionsPath: string | null = null
-const pending = new Set<string>()
+const pending = new Map<string, Kind>()
+// a whole-file write's arguments as they stream in, by the block's index, until the file's name can be read from them
+const naming = new Map<number, { id: string; json: string }>()
 
 const resolvePath = async ($: EngineInterface, options: Options) => {
   if (questionsPath !== null) {
@@ -109,18 +125,50 @@ const readQuestions = async ($: EngineInterface, options: Options) => {
 }
 
 const setWriting = async ($: EngineInterface) => {
-  const n = pending.size
-  await update($, writing, () => n)
+  const n = (k: Kind) => [...pending.values()].filter(v => v === k).length
+  const [c, cr, rw, e] = [n('command'), n('create'), n('rewrite'), n('edit')]
+  await update($, writing, () => c)
+  await update($, creatingFiles, () => cr)
+  await update($, rewritingFiles, () => rw)
+  await update($, editingFiles, () => e)
 }
 
-// passes the reply's stream through untouched, noting each shell command whose writing begins
+// a whole-file write whose name has streamed in: a file that already exists is REWRITTEN, not created (the band asks
+// only whether the path exists - it never reads the file)
+const nameWrite = async ($: EngineInterface, id: string, json: string) => {
+  const m = FILE_PATH.exec(json)
+  if (!m) {
+    return false
+  }
+  const path = JSON.parse(`"${m[1]}"`) as string
+  if (pending.get(id) === 'create' && (await $.fs.exists(path).catch(() => false))) {
+    pending.set(id, 'rewrite')
+    await setWriting($)
+  }
+  return true
+}
+
+// passes the reply's stream through untouched, noting each command or file whose writing begins
 async function* tap($: EngineInterface, stream: AsyncGenerator<TurnStepChunk, TurnStepResult>) {
   let step = await stream.next()
   while (!step.done) {
     const c = step.value
-    if (c.kind === 'tool' && COMMANDS.includes(c.name)) {
-      pending.add(c.id)
+    const kind = c.kind === 'tool' ? WRITTEN.get(c.name) : undefined
+    if (c.kind === 'tool') {
+      naming.delete(c.index)  // a new call at this place: an earlier write's name hunt there is over
+    }
+    if (c.kind === 'tool' && kind) {
+      pending.set(c.id, kind)
+      if (kind === 'create') {
+        naming.set(c.index, { id: c.id, json: '' })
+      }
       await setWriting($).catch(() => undefined)
+    } else if (c.kind === 'input' && naming.has(c.index)) {
+      const w = naming.get(c.index) as { id: string; json: string }
+      w.json += c.json
+      if (await nameWrite($, w.id, w.json).catch(() => true)) {
+        naming.delete(c.index)
+      }
     }
     yield c
     step = await stream.next()
@@ -214,7 +262,8 @@ export const register: Register = (on, rawOptions) => {
     await update($, counts, () => now)
     await update($, running, () => 0)
     pending.clear()
-    await update($, writing, () => 0)
+    naming.clear()
+    await setWriting($)
     await readQuestions($, options)
 
     const d = await read($, dir)
@@ -289,7 +338,16 @@ export const register: Register = (on, rawOptions) => {
     const cmds = await read($, running)
     const cmdLabel = cmds === 1 ? '1 command running' : `${cmds} commands running`
     const wr = await read($, writing)
-    const wrLabel = wr === 1 ? 'writing a command' : `writing ${wr} commands`
+    const wc = await read($, creatingFiles)
+    const wrw = await read($, rewritingFiles)
+    const we = await read($, editingFiles)
+    // several edits waiting may be to one file or to several, so they are counted as edits
+    const writes = [
+      wr === 0 ? '' : wr === 1 ? 'writing a command' : `writing ${wr} commands`,
+      wc === 0 ? '' : wc === 1 ? 'creating a file' : `creating ${wc} files`,
+      wrw === 0 ? '' : wrw === 1 ? 'rewriting a file' : `rewriting ${wrw} files`,
+      we === 0 ? '' : we === 1 ? 'editing a file' : `making ${we} edits`,
+    ].filter(Boolean)
     const isHidden = await read($, hidden)
     const { Box, Button, Text } = $.ui.resolve(e)
     // short labels: a desktop draws a button's label, and every character it takes is room the first row needs
@@ -329,8 +387,10 @@ export const register: Register = (on, rawOptions) => {
           {detail ? <Text color="inactive">{detail}</Text> : null}
           <Text color="inactive">{' · '}</Text>
           <Text color={cmds > 0 ? 'success' : 'inactive'}>{cmdLabel}</Text>
-          {wr > 0 ? <Text color="inactive">{' · '}</Text> : null}
-          {wr > 0 ? <Text color={ROAST}>{wrLabel}</Text> : null}
+          {writes.flatMap(w => [
+            <Text key={`dot-${w}`} color="inactive">{' · '}</Text>,
+            <Text key={w} color={ROAST}>{w}</Text>,
+          ])}
         </Box>
         {toggle}
       </Box>

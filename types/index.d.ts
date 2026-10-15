@@ -16,6 +16,12 @@ declare module 'claude-code' {
       hidden: boolean
       /** shell commands Claude is writing right now: from the call's first streamed piece until the call runs */
       writing: number
+      /** whole files Claude is writing right now that do not exist yet: the same span */
+      creatingFiles: number
+      /** whole files Claude is writing right now whose name, once streamed in, is a file that already exists */
+      rewritingFiles: number
+      /** changes to files Claude is writing right now (Edit, NotebookEdit): the same span */
+      editingFiles: number
       /** the questions waiting: the open "- [ ]" lines of the questions file, read, never typed */
       questions: string[]
       /** the waiting questions unfolded under the band by the person */
