@@ -8,6 +8,7 @@
   "repository": "https://github.com/AzalorisTheEmolian/glance-band",
   "license": "MIT",
   "keywords": ["status", "background-tasks", "questions", "band", "at-a-glance"],
+  "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {
     "questions_file": {
