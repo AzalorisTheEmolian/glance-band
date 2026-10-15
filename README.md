@@ -69,6 +69,20 @@ scheduled jobs - the whole truth, once a turn. Between turn ends the band moves 
 file of each running background shell is read for the line Claude Code writes when a shell ends (`[killed]` - a stop
 from the tasks panel too, which raises no event a plugin can hear - or `[exited with code N]`).
 
+## What each hook does
+
+Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it registers, and what it does or changes:
+
+| Hook | What it does | Changes anything? |
+| :- | :- | :- |
+| `session.start` | Registers the `/band` command, reads the questions file once, starts a 2-second timer that re-reads the questions file and the running shells' output files | No |
+| `command.run` for `/band` | Answers the plugin's own `/band` command: folds or unfolds the band | Only its own command |
+| `prompt.compose` | With `teach_claude` on, adds ONE section at the end of Claude's system prompt: the note asking Claude to keep the questions file (its text is in `hooks/register.tsx`, `QUESTIONS_NOTE`). Every other section passes through untouched | Adds that one section; nothing else |
+| `classic.Stop` | At each turn's end, reads the session's in-flight background tasks and scheduled jobs to set the counts | No |
+| `turn.step` | Watches Claude's reply as it streams, to notice a shell command being written; every piece passes through unchanged | No |
+| `tool.call` | Counts a shell command while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
+| `ui.render` for the band above the prompt | Draws the band | Draws its own band only |
+
 ## Your data: what it reads, holds, causes to be stored, and what leaves your computer
 
 - **Reads, keeps nothing from:** the session's own events; the output files of running background shells (only their

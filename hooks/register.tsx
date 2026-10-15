@@ -191,7 +191,7 @@ export const register: Register = (on, rawOptions) => {
   })
 
   on('command.run', { command: 'band' }, async $ => {
-    await update($, hidden, h => !h)
+    await update($, hidden, folded => !folded)
     return { text: (await read($, hidden)) ? 'The band is folded - /band or its Show button brings it back.' : 'The band is shown.' }
   })
 
@@ -293,8 +293,9 @@ export const register: Register = (on, rawOptions) => {
     const isHidden = await read($, hidden)
     const { Box, Button, Text } = $.ui.resolve(e)
     // short labels: a desktop draws a button's label, and every character it takes is room the first row needs
+    // (never a parameter named h: JSX compiles every element to a call of h, and a second h would shadow it)
     const toggle = (
-      <Button key="toggle" label={isHidden ? 'Show' : 'Hide'} onPress={() => update($, hidden, h => !h)}>
+      <Button key="toggle" label={isHidden ? 'Show' : 'Hide'} onPress={() => update($, hidden, folded => !folded)}>
         <Text color="claude">{isHidden ? SHOW : HIDE}</Text>
       </Button>
     )

@@ -1,7 +1,7 @@
 {
   "name": "glance-band",
   "displayName": "Glance Band",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, commands running, a command being written - and how many of Claude's questions wait for your answer.",
   "author": { "name": "Azaloris the Emolian", "url": "https://github.com/AzalorisTheEmolian" },
   "homepage": "https://github.com/AzalorisTheEmolian/glance-band",
