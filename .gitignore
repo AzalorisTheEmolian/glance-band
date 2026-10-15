@@ -1,0 +1,4 @@
+# the declarations Claude Code lays beside a mod it loads from this folder - regenerated at every load
+.claude-plugin/types/
+node_modules/
+*.log

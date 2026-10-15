@@ -1,0 +1,12 @@
+{
+  "name": "glance-band",
+  "description": "Glance Band: what Claude Code is doing, and whether a question of Claude's waits for you, at a glance above the prompt.",
+  "owner": { "name": "Azaloris" },
+  "plugins": [
+    {
+      "name": "glance-band",
+      "source": "./",
+      "description": "A band above the prompt: background tasks and loops, commands running, a command being written, and Claude's questions waiting for you - at a glance."
+    }
+  ]
+}

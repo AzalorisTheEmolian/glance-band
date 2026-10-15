@@ -1,0 +1,26 @@
+{
+  "name": "glance-band",
+  "displayName": "Glance Band",
+  "version": "1.0.0",
+  "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, commands running, a command being written - and how many of Claude's questions wait for your answer.",
+  "author": { "name": "Azaloris" },
+  "homepage": "https://github.com/AzalorisTheEmolian/glance-band",
+  "repository": "https://github.com/AzalorisTheEmolian/glance-band",
+  "license": "MIT",
+  "keywords": ["status", "background-tasks", "questions", "band", "at-a-glance"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "questions_file": {
+      "type": "string",
+      "title": "Questions file",
+      "description": "The Markdown file the questions counter reads: each line starting \"- [ ] \" is a question waiting, \"- [x] \" an answered one. Leave empty for <your home folder>/.claude/questions_waiting.md.",
+      "default": ""
+    },
+    "teach_claude": {
+      "type": "boolean",
+      "title": "Ask Claude to keep the questions file",
+      "description": "Adds a short section to the system prompt (about 120 tokens per request) asking Claude to write each question it puts to you into the questions file, and to tick it off once answered. Turn off if you keep the file another way.",
+      "default": true
+    }
+  }
+}
