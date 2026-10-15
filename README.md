@@ -69,13 +69,24 @@ scheduled jobs - the whole truth, once a turn. Between turn ends the band moves 
 file of each running background shell is read for the line Claude Code writes when a shell ends (`[killed]` - a stop
 from the tasks panel too, which raises no event a plugin can hear - or `[exited with code N]`).
 
-## What it reads and writes
+## Your data: what it reads, holds, causes to be stored, and what leaves your computer
 
-- **Reads:** the session's own events; the output files of running background shells (to see when one ends); the
-  questions file; the `HOME` and `USERPROFILE` environment variables (only to find the default questions file).
-- **Writes:** nothing on disk. It keeps its display state in the session and registers the `/band` command.
-- **Network:** none.
-- **Context cost:** with `teach_claude` on, one short system-prompt section; off, nothing.
+- **Reads, keeps nothing from:** the session's own events; the output files of running background shells (only their
+  last line, to see when one ends); the `HOME` and `USERPROFILE` environment variables (only to find your home folder).
+- **Holds for the session only:** the counts, the IDs of running shells and their output files' paths, and **the text
+  of your open questions** - in Claude Code's session memory, gone when the session ends (it survives only a reload of
+  the plugin). Glance Band uses no persistent plugin storage. Note: Claude Code lets any other plugin in the same
+  session read these values.
+- **Causes storage - one file on your disk:** with `teach_claude` on (the default), Glance Band asks Claude to write
+  each question it puts to you into the questions file (by default `<home>/.claude/questions_waiting.md`). The plugin's
+  own code writes nothing, but that file exists because of it, holds whatever your questions say, and **stays until
+  you delete it**. Turn `teach_claude` off and Glance Band causes no storage at all.
+- **What leaves your computer:** the plugin itself makes no network calls. With `teach_claude` on, the note it adds to
+  Claude's system prompt includes the questions file's path - which contains your home folder's name - and is sent to
+  Anthropic's model with every request, through Claude Code's own channel; when Claude edits the questions file, its
+  contents pass through the model like any file Claude edits. Nothing goes to any other service.
+- **Context cost:** with `teach_claude` on, one short system-prompt section (about 120 tokens per request); off,
+  nothing.
 
 ## Known limits
 
