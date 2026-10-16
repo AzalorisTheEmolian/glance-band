@@ -22,6 +22,8 @@ declare module 'claude-code' {
       rewritingFiles: number
       /** changes to files Claude is writing right now (Edit, NotebookEdit): the same span */
       editingFiles: number
+      /** the searches running right now (Grep, Glob), in this turn: each counted from its call to its return */
+      searching: number
       /** the questions waiting: the open "- [ ]" lines of the questions file, read, never typed */
       questions: string[]
       /** the waiting questions unfolded under the band by the person */

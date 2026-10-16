@@ -30,10 +30,14 @@ const writing = atom({ plugin: 'glance-band', key: 'writing' } as const, 0)
 const creatingFiles = atom({ plugin: 'glance-band', key: 'creatingFiles' } as const, 0)
 const rewritingFiles = atom({ plugin: 'glance-band', key: 'rewritingFiles' } as const, 0)
 const editingFiles = atom({ plugin: 'glance-band', key: 'editingFiles' } as const, 0)
+const searching = atom({ plugin: 'glance-band', key: 'searching' } as const, 0)
 const questions =atom({ plugin: 'glance-band', key: 'questions' } as const, [])
 const showQuestions = atom({ plugin: 'glance-band', key: 'showQuestions' } as const, false)
 
 const COMMANDS = ['Bash', 'PowerShell']
+// A SEARCH RUNNING - Grep or Glob, what Claude Code draws as "Searching <pattern>" - from its call until it returns, in
+// the same brown as what is being written; a search over a large folder can run for minutes
+const SEARCHES = ['Grep', 'Glob']
 // WHAT IS BEING WRITTEN, from a call's first streamed piece until Claude Code runs it: a command, a whole file (a new
 // one, or one that already exists - decided once the file's name streams in), or an edit; reading is left out (a read
 // is a file name and runs in a blink). Each kind is counted on its own: Claude Code sometimes holds several calls of
@@ -261,6 +265,7 @@ export const register: Register = (on, rawOptions) => {
     const now: Counts = { tasks: live.length, crons }
     await update($, counts, () => now)
     await update($, running, () => 0)
+    await update($, searching, () => 0)
     pending.clear()
     naming.clear()
     await setWriting($)
@@ -290,10 +295,20 @@ export const register: Register = (on, rawOptions) => {
       await setWriting($).catch(() => undefined)
     }
     const isCommand = COMMANDS.includes(e.tool)
+    const isSearch = SEARCHES.includes(e.tool)
+    // each counter is named where it is written: Claude Code's scan lists what a module reads and writes from the call
     if (isCommand) {
       await update($, running, n => n + 1).catch(() => undefined)
+    } else if (isSearch) {
+      await update($, searching, n => n + 1).catch(() => undefined)
     }
-    const r = await next(e).finally(() => (isCommand ? update($, running, n => Math.max(0, n - 1)).catch(() => undefined) : undefined))
+    const r = await next(e).finally(() =>
+      isCommand
+        ? update($, running, n => Math.max(0, n - 1)).catch(() => undefined)
+        : isSearch
+          ? update($, searching, n => Math.max(0, n - 1)).catch(() => undefined)
+          : undefined,
+    )
     try {
       if (r.deny || r.isError) {
         return r
@@ -341,8 +356,11 @@ export const register: Register = (on, rawOptions) => {
     const wc = await read($, creatingFiles)
     const wrw = await read($, rewritingFiles)
     const we = await read($, editingFiles)
-    // several edits waiting may be to one file or to several, so they are counted as edits
+    const sr = await read($, searching)
+    // several edits waiting may be to one file or to several, so they are counted as edits; a search running stands
+    // first among the brown labels, beside the commands running
     const writes = [
+      sr === 0 ? '' : sr === 1 ? 'searching' : `running ${sr} searches`,
       wr === 0 ? '' : wr === 1 ? 'writing a command' : `writing ${wr} commands`,
       wc === 0 ? '' : wc === 1 ? 'creating a file' : `creating ${wc} files`,
       wrw === 0 ? '' : wrw === 1 ? 'rewriting a file' : `rewriting ${wrw} files`,

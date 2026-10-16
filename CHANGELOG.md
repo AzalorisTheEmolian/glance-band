@@ -1,5 +1,12 @@
 # Changes
 
+## 1.1.1
+
+- **A search running is shown.** While a search Claude started runs (Grep or Glob - what Claude Code draws as
+  "Searching ..."), the band shows "searching" in the same brown, beside the commands running; "running N searches"
+  when several run at once. Before, a search of several minutes left the band reading "0 commands running".
+- Nothing new is read or stored: the band only counts the search calls by their tool's name.
+
 ## 1.1.0
 
 - **What Claude is writing, for files too.** Beside "writing a command", the band now shows "creating a file" (a whole

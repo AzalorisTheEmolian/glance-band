@@ -256,6 +256,46 @@ test('writing a command: brown from its first streamed piece until it runs, its 
   await ui.unmount()
 })
 
+const SEARCH = { type: 'Text', text: /searching|searches/ } as const
+
+test('searching: brown while a Grep or a Glob runs, its own dot, the commands untouched, two counted, gone after', async ($, on) => {
+  const during: { text?: string; color?: unknown; dots: number; cmds?: string }[] = []
+  let second = false
+  on('classic.Stop', async () => ({}))
+  on('tool.call', async (_$, e) => {
+    const tool = (e as { tool?: string }).tool
+    if (tool === 'Grep' && second) {
+      second = false
+      await $.tool.call({ tool: 'Glob', pattern: '**/*.md' })  // a second search while the first still runs
+    }
+    if (tool === 'Grep' || tool === 'Glob') {
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+      const s = await ui.find(SEARCH)
+      const dots = (await ui.findAll({ type: 'Text', text: '·' })).length
+      during.push({ text: s?.text, color: s?.props.color, dots, cmds: (await ui.find(CMDS))?.text })
+      await ui.unmount()
+    }
+    return { result: {}, text: 'done' }
+  })
+
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
+  let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect(await ui.find(SEARCH)).toBeUndefined()
+  await ui.unmount()
+
+  await $.tool.call({ tool: 'Grep', pattern: 'TODO' })
+  await $.tool.call({ tool: 'Glob', pattern: '**/*.md' })
+  second = true
+  await $.tool.call({ tool: 'Grep', pattern: 'FIXME' })
+  const one = { text: 'searching', color: '#9C6644', dots: 2, cmds: '0 commands running' }
+  expect(during).toEqual([one, one, { ...one, text: 'running 2 searches' }, one])
+
+  ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect(await ui.find(SEARCH)).toBeUndefined()
+  expect((await ui.findAll({ type: 'Text', text: '·' })).length).toBe(1)
+  await ui.unmount()
+})
+
 // Claude Code sometimes runs a call as soon as it is written and sometimes holds several of one reply until the last
 // is written; the harness runs no call while a reply is still being written, so the held state is handed to it whole:
 // the reply's pieces first, then the calls

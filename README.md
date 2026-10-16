@@ -13,6 +13,9 @@ questions is waiting for your answer.
   (`/loop`, CronCreate, wakeups). **Blue** while anything runs, **grey** at zero, **lilac** when the only thing running
   is a loop. A grey note says what is running: `(1 task, 1 scheduled)` or `(loop)`.
 - **N commands running** - shell commands (Bash, PowerShell) running right now. **Green** while any run.
+- **searching** - **brown**, while a search Claude started (Grep or Glob - what Claude Code draws as "Searching
+  ...") runs; **running N searches** when several run at once. A search over a large folder can take minutes, and
+  until 1.1.1 the band showed nothing while one ran.
 - **What Claude is writing** - **brown**, from the moment Claude starts writing a call until it runs. Shown only then:
   - **writing a command** - a shell command;
   - **creating a file** - a whole new file;
@@ -90,7 +93,7 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
 | `prompt.compose` | With `teach_claude` on, adds ONE section at the end of Claude's system prompt: the note asking Claude to keep the questions file (its text is in `hooks/register.tsx`, `QUESTIONS_NOTE`). Every other section passes through untouched | Adds that one section; nothing else |
 | `classic.Stop` | At each turn's end, reads the session's in-flight background tasks and scheduled jobs to set the counts | No |
 | `turn.step` | Watches Claude's reply as it streams, to notice a shell command, a file or an edit being written; for a whole-file write it reads the file's name from the streamed arguments and asks only whether that path already exists. Every piece passes through unchanged | No |
-| `tool.call` | Ends a "being written" label when its call starts; counts a shell command while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
+| `tool.call` | Ends a "being written" label when its call starts; counts a shell command or a search (Grep, Glob) while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
 | `ui.render` for the band above the prompt | Draws the band | Draws its own band only |
 
 ## Your data: what it reads, holds, causes to be stored, and what leaves your computer
