@@ -3,7 +3,7 @@
 A band above Claude Code's prompt that tells you, at a single glance, what Claude is doing - and whether one of its
 questions is waiting for your answer.
 
-![Glance Band with a question waiting and its list open](docs/question-waiting-list-open.png)
+![Glance Band in the session that asked: one question waiting in this session, its list open](docs/this-session-question-listed.png)
 
 ## What it shows
 
@@ -31,12 +31,15 @@ questions is waiting for your answer.
 
 **Row 2 - your turn**
 
-- **N questions waiting** - **white** at zero, a calm **yellow** from one - with a **List** button that unfolds the
-  open questions under it (**Close** folds them again; with none waiting it says "No question waits").
+- **N questions waiting: this session; M questions waiting: other sessions** - each count **white** at zero, a calm
+  **yellow** from one - with a **List** button that unfolds **this session's** open questions under it (**Close** folds
+  them again; with none waiting in this session it says "No question waits"). Every session shares one questions file,
+  so a question Claude asked you in another session is counted under "other sessions" and never listed here - since
+  1.2.0.
 
-![No question waiting](docs/none-waiting.png)
+The same question seen from another session - counted, not listed:
 
-![No question waiting, the list open](docs/none-waiting-list-open.png)
+![Another session: no question waiting in this session, one in other sessions](docs/other-session-waiting.png)
 
 ## Install
 
@@ -52,18 +55,28 @@ too. Glance Band is a "mod" (a plugin of function hooks); it was built and teste
 
 ## The questions file
 
-The counter reads one Markdown file. Every line that starts with `- [ ] ` is a question waiting; every line that starts
-with `- [x] ` is answered and no longer counted:
+The counter reads one Markdown file, shared by all your sessions. Every line that starts with `- [ ] ` is a question
+waiting; every line that starts with `- [x] ` is answered and no longer counted. Each session's questions stand in a
+section of their own, between the session's two lines:
 
 ```markdown
+## session 0b7e4c2a-5d1f-4e8b-9a36-2f0c8d1e7b45
 - [ ] 2026-10-14 20:30 · the release · ship today or tomorrow?
 - [x] 2026-10-14 18:52 · the README wording - answered: keep it short
+<!-- end of session 0b7e4c2a-5d1f-4e8b-9a36-2f0c8d1e7b45 -->
 ```
 
+The id is the session's own id - the name of its transcript file - which stays the same when you rename the session,
+so a session's name is never used. The band counts the open lines of the session you are looking at, lists only
+those, and counts every other open line - in another session's section, or outside every section - under "other
+sessions".
+
 By default the file is `<your home folder>/.claude/questions_waiting.md`. Glance Band adds a short section to Claude's
-system prompt asking it to write each question it puts to you into that file in the same step, and to tick it off once
-you answer - so a glance at the band tells you whether Claude is waiting on you, without asking "do you have any
-questions for me?". You can edit the file by hand too; the band re-reads it every two seconds.
+system prompt that names the session's id and its section, and asks Claude to write each question it puts to you into
+that section in the same step, to tick it off once you answer, and to ask you only the questions of its own section -
+so a glance at the band tells you whether Claude is waiting on you, without asking "do you have any questions for
+me?". The section is sent with every request, so it holds after a conversation is compacted too. You can edit the file
+by hand; the band re-reads it every two seconds.
 
 ## Settings
 
@@ -72,7 +85,7 @@ Set at install, or later in `/config`:
 | Setting | Default | What it does |
 | :- | :- | :- |
 | `questions_file` | empty | The Markdown file the counter reads. Empty means `<home>/.claude/questions_waiting.md`. |
-| `teach_claude` | on | Adds the system-prompt section that asks Claude to keep the questions file (about 120 tokens per request). Turn it off if you keep the file another way. |
+| `teach_claude` | on | Adds the system-prompt section that asks Claude to keep the questions file, in the session's own section (about 300 tokens per request). Turn it off if you keep the file another way. |
 
 ## How the counts stay true
 
@@ -90,7 +103,7 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
 | :- | :- | :- |
 | `session.start` | Registers the `/band` command, reads the questions file once, starts a 2-second timer that re-reads the questions file and the running shells' output files | No |
 | `command.run` for `/band` | Answers the plugin's own `/band` command: folds or unfolds the band | Only its own command |
-| `prompt.compose` | With `teach_claude` on, adds ONE section at the end of Claude's system prompt: the note asking Claude to keep the questions file (its text is in `hooks/register.tsx`, `QUESTIONS_NOTE`). Every other section passes through untouched | Adds that one section; nothing else |
+| `prompt.compose` | With `teach_claude` on, adds ONE section at the end of Claude's system prompt: the note asking Claude to keep the questions file in the session's own section, which it names by the session's id (its text is in `hooks/register.tsx`, `QUESTIONS_NOTE`). Every other section passes through untouched | Adds that one section; nothing else |
 | `classic.Stop` | At each turn's end, reads the session's in-flight background tasks and scheduled jobs to set the counts | No |
 | `turn.step` | Watches Claude's reply as it streams, to notice a shell command, a file or an edit being written; for a whole-file write it reads the file's name from the streamed arguments and asks only whether that path already exists. Every piece passes through unchanged | No |
 | `tool.call` | Ends a "being written" label when its call starts; counts a shell command or a search (Grep, Glob) while it runs, and a background launch, `TaskStop`, `CronCreate` or `CronDelete` when its call returns. Every tool call is passed on as made and its result returned as given; it never blocks, delays or rewrites a call | No |
@@ -98,8 +111,10 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
 
 ## Your data: what it reads, holds, causes to be stored, and what leaves your computer
 
-- **Reads, keeps nothing from:** the session's own events; the output files of running background shells (only their
-  last line, to see when one ends); the `HOME` and `USERPROFILE` environment variables (only to find your home folder);
+- **Reads, keeps nothing from:** the session's own events; **the session's id** (its transcript file's name, from
+  Claude Code - only to find the session's section of the questions file and to name it in the note); the output files
+  of running background shells (only their last line, to see when one ends); the `HOME` and `USERPROFILE` environment
+  variables (only to find your home folder);
   and, when Claude writes a whole file, **whether that file's path already exists** - a yes or no from your disk, to
   choose between "creating" and "rewriting"; the file itself is never opened or read.
 - **Holds for the session only:** the counts, the IDs of running shells and their output files' paths, and **the text
@@ -111,13 +126,15 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
   first, so this is the name itself) - then dropped; nothing of them is kept, shown or sent.
 - **Causes storage - one file on your disk:** with `teach_claude` on (the default), Glance Band asks Claude to write
   each question it puts to you into the questions file (by default `<home>/.claude/questions_waiting.md`). The plugin's
-  own code writes nothing, but that file exists because of it, holds whatever your questions say, and **stays until
-  you delete it**. Turn `teach_claude` off and Glance Band causes no storage at all.
+  own code writes nothing, but that file exists because of it, holds whatever your questions say - and, since 1.2.0,
+  each session's id in its section's two lines - and **stays until you delete it**. Turn `teach_claude` off and
+  Glance Band causes no storage at all.
 - **What leaves your computer:** the plugin itself makes no network calls. With `teach_claude` on, the note it adds to
-  Claude's system prompt includes the questions file's path - which contains your home folder's name - and is sent to
-  Anthropic's model with every request, through Claude Code's own channel; when Claude edits the questions file, its
-  contents pass through the model like any file Claude edits. Nothing goes to any other service.
-- **Context cost:** with `teach_claude` on, one short system-prompt section (about 120 tokens per request); off,
+  Claude's system prompt includes the questions file's path - which contains your home folder's name - and the
+  session's id, and is sent to Anthropic's model with every request, through Claude Code's own channel; when Claude
+  edits the questions file, its contents pass through the model like any file Claude edits. Nothing goes to any other
+  service.
+- **Context cost:** with `teach_claude` on, one short system-prompt section (about 300 tokens per request); off,
   nothing.
 
 ## Known limits
@@ -126,6 +143,9 @@ Glance Band is a mod: one hooks module (`hooks/register.tsx`). Every hook it reg
   plain text beside small buttons, not coloured buttons.
 - Mods (function hooks) are an early-access API; a later Claude Code release may change what the band can do.
 - Anything the band cannot hear between turn ends is corrected at the next turn's end.
+- A session's id changes after `/clear` (and when a terminal session is resumed into a new one): the questions of its
+  old section then count under "other sessions". Questions written before 1.2.0 stand outside every section and count
+  there too - move a line into a session's section to list it in that session.
 
 ## Changes
 

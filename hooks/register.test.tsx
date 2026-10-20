@@ -9,7 +9,8 @@ const BAND = {
 const COUNT = { type: 'Text', text: /background tasks? running/ } as const
 const CMDS = { type: 'Text', text: /commands? running/ } as const
 const WRITING = { type: 'Text', text: /writing (a|\d+) commands?/ } as const
-const QUESTIONS = { type: 'Text', text: /questions? waiting/ } as const
+const QUESTIONS = { type: 'Text', text: /questions? waiting: this session/ } as const
+const OTHERS = { type: 'Text', text: /questions? waiting: other sessions/ } as const
 
 const SHELL = { id: 'b1', type: 'shell', status: 'running', description: 'a long build' }
 const LOOP = { id: 'c1', schedule: '*/15 * * * *', recurring: true, prompt: 'a loop' }
@@ -378,18 +379,29 @@ test('creating, rewriting and editing: each kind counted, all on one line, the s
   expect((await texts()).some(t => /writing|creating|editing|edits/.test(t))).toBe(false)
 })
 
+// one file, one section per session (1.2.0): this test's session is S1; S2 is another session, and the line above
+// every section was written before the sections began - both another session's
 const QTEXT = [
   '# Questions waiting',
+  '- [ ] 2026-10-13 09:00 · before the sections · an old open one',
+  '',
+  '## session S1',
   '- [ ] 2026-10-14 20:30 · the release · ship today or tomorrow?',
   '- [x] 2026-10-14 18:52 · the README wording (answered)',
   '- [ ] 2026-10-14 20:31 · the old build folders · delete 26 GB of them?',
+  '<!-- end of session S1 -->',
+  '',
+  '## session S2',
+  '- [ ] 2026-10-14 21:00 · the other work · the other session\'s question',
+  '<!-- end of session S2 -->',
   '',
 ].join('\n')
 
-test('the questions counter: counted from the file, yellow while any waits, white at zero, the list on a press', WITH_QFILE, async ($, on) => {
+test('the questions counter: this session and the other sessions apart, yellow while any waits, the list this session\'s', WITH_QFILE, async ($, on) => {
   let qtext: string | null = QTEXT
   let qtime = 1
   const asked: string[] = []
+  on('session.id', async () => ({ value: 'S1' }))
   on('classic.Stop', async () => ({}))
   on('fs.stat', async ($, e) => {
     asked.push(String(e.path))
@@ -404,7 +416,11 @@ test('the questions counter: counted from the file, yellow while any waits, whit
   let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
   expect(asked.some(isQ)).toBe(true)
   let q = await ui.find(QUESTIONS)
-  expect(q?.text).toBe('2 questions waiting')
+  expect(q?.text).toBe('2 questions waiting: this session')
+  // the other sessions' count beside it: S2's line and the one outside every section
+  expect((await ui.find(OTHERS))?.text).toBe('2 questions waiting: other sessions')
+  expect((await ui.find(OTHERS))?.props.color).toBe('#E5C07B')
+  expect((await ui.find({ type: 'Text', text: /^; $/ }))?.text).toBe('; ')
   // from 1: plain text in the calm yellow (a desktop paints a button's text white), a short List button beside it
   expect(q?.props.color).toBe('#E5C07B')
   expect((await ui.find({ key: 'questions' }))?.props.label).toBe('List')
@@ -414,19 +430,28 @@ test('the questions counter: counted from the file, yellow while any waits, whit
   expect((await ui.find({ type: 'Text', text: /ship today/ }))?.text).toBe('1. 2026-10-14 20:30 · the release · ship today or tomorrow?')
   expect((await ui.find({ type: 'Text', text: /26 GB/ }))?.props.color).toBe('warning')
   expect(await ui.find({ type: 'Text', text: /answered/ })).toBeUndefined()
+  // the list is this session's alone
+  expect(await ui.find({ type: 'Text', text: /other session's question/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /an old open one/ })).toBeUndefined()
   expect((await ui.find({ key: 'questions' }))?.props.label).toBe('Close')
   await ui.press({ key: 'questions' })
   expect(await ui.find({ type: 'Text', text: /ship today/ })).toBeUndefined()
   await ui.unmount()
 
-  qtext = '- [x] 2026-10-14 20:30 · the release · ship today or tomorrow? - today\n'
+  qtext = [
+    '## session S1', '- [x] 2026-10-14 20:30 · the release · ship today or tomorrow? - today', '<!-- end of session S1 -->',
+    '## session S2', '- [ ] 2026-10-14 21:00 · the other work · the other session\'s question', '<!-- end of session S2 -->', '',
+  ].join('\n')
   qtime = 2
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
   ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
   q = await ui.find(QUESTIONS)
-  expect(q?.text).toBe('0 questions waiting')
-  // at 0: white plain text (the theme's own text colour), with the same List button beside it
+  expect(q?.text).toBe('0 questions waiting: this session')
+  // at 0: white plain text (the theme's own text colour), with the same List button beside it; the other sessions'
+  // 1 stays yellow
   expect(q?.props.color).toBe('text')
+  expect((await ui.find(OTHERS))?.text).toBe('1 question waiting: other sessions')
+  expect((await ui.find(OTHERS))?.props.color).toBe('#E5C07B')
   expect((await ui.find({ key: 'questions' }))?.props.label).toBe('List')
   expect(await ui.find({ type: 'Text', text: /question waits/ })).toBeUndefined()
   await ui.press({ key: 'questions' })
@@ -437,12 +462,15 @@ test('the questions counter: counted from the file, yellow while any waits, whit
   qtext = null
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
   ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
-  expect((await ui.find(QUESTIONS))?.text).toBe('0 questions waiting')
+  expect((await ui.find(QUESTIONS))?.text).toBe('0 questions waiting: this session')
+  expect((await ui.find(OTHERS))?.text).toBe('0 questions waiting: other sessions')
+  expect((await ui.find(OTHERS))?.props.color).toBe('text')
   await ui.unmount()
 })
 
 test('the questions list never outgrows the band: past its rows the rest are counted', WITH_QFILE, async ($, on) => {
-  const many = ['- [ ] a', '- [ ] b', '- [ ] c', '- [ ] d'].join('\n') + '\n'
+  const many = ['## session S1', '- [ ] a', '- [ ] b', '- [ ] c', '- [ ] d', '<!-- end of session S1 -->'].join('\n') + '\n'
+  on('session.id', async () => ({ value: 'S1' }))
   on('classic.Stop', async () => ({}))
   on('fs.stat', async () => ({ value: { kind: 'file', size: many.length, mtimeMs: 7, isLink: false } }))
   on('fs.read', async ($, e) => ({ value: isQ(e.path) ? many : '' }))
@@ -450,7 +478,7 @@ test('the questions list never outgrows the band: past its rows the rest are cou
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
   const small = { ...BAND, props: { ...BAND.props, maxRows: 4 } }
   const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...small })
-  expect((await ui.find(QUESTIONS))?.text).toBe('4 questions waiting')
+  expect((await ui.find(QUESTIONS))?.text).toBe('4 questions waiting: this session')
   await ui.press({ key: 'questions' })
   expect((await ui.find({ type: 'Text', text: /^1\. a$/ }))?.text).toBe('1. a')
   expect(await ui.find({ type: 'Text', text: /^2\. b$/ })).toBeUndefined()
@@ -458,13 +486,18 @@ test('the questions list never outgrows the band: past its rows the rest are cou
   await ui.unmount()
 })
 
-test('the note to Claude: one session section naming the questions file, unless turned off', WITH_QFILE, async ($, on) => {
+test('the note to Claude: one session section naming the questions file and THIS session\'s section, unless turned off', WITH_QFILE, async ($, on) => {
+  on('session.id', async () => ({ value: 'S1' }))
   on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'the engine prompt', scope: 'shared' as const }] }))
   const r = await $.prompt.compose(FACTS as never)
   const note = r.sections.find(s => s.id === 'glance-band:questions')
   expect(note?.scope).toBe('session')
   expect(note?.text.includes(QFILE)).toBe(true)
   expect(note?.text.includes('- [ ] YYYY-MM-DD HH:MM')).toBe(true)
+  // the session's id, its two section lines, and the rule to ask only this section's questions
+  expect(note?.text.includes('THIS SESSION\'S ID IS S1')).toBe(true)
+  expect(note?.text.includes('"## session S1" and "<!-- end of session S1 -->"')).toBe(true)
+  expect(note?.text.includes('Ask the user only the questions in this session\'s section')).toBe(true)
   expect(r.sections[0].id).toBe('intro')
 })
 

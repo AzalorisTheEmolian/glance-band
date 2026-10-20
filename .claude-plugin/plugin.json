@@ -1,8 +1,8 @@
 {
   "name": "glance-band",
   "displayName": "Glance Band",
-  "version": "1.1.1",
-  "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, commands and searches running, a command or a file being written - and how many of Claude's questions wait for your answer.",
+  "version": "1.2.0",
+  "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, commands and searches running, a command or a file being written - and how many of Claude's questions wait for your answer, in this session and in your other sessions.",
   "author": { "name": "Azaloris the Emolian", "url": "https://github.com/AzalorisTheEmolian" },
   "homepage": "https://github.com/AzalorisTheEmolian/glance-band",
   "repository": "https://github.com/AzalorisTheEmolian/glance-band",
@@ -17,13 +17,13 @@
     "questions_file": {
       "type": "string",
       "title": "Questions file",
-      "description": "The Markdown file the questions counter reads: each line starting \"- [ ] \" is a question waiting, \"- [x] \" an answered one. Leave empty for <your home folder>/.claude/questions_waiting.md.",
+      "description": "The Markdown file the questions counter reads, shared by all your sessions, one section per session: each line starting \"- [ ] \" is a question waiting, \"- [x] \" an answered one. Leave empty for <your home folder>/.claude/questions_waiting.md.",
       "default": ""
     },
     "teach_claude": {
       "type": "boolean",
       "title": "Ask Claude to keep the questions file",
-      "description": "Adds a short section to the system prompt (about 120 tokens per request) asking Claude to write each question it puts to you into the questions file, and to tick it off once answered. Turn off if you keep the file another way.",
+      "description": "Adds a short section to the system prompt (about 300 tokens per request) naming the session's id and asking Claude to write each question it puts to you into the session's own section of the questions file, to tick it off once answered, and to ask you only its own section's questions. Turn off if you keep the file another way.",
       "default": true
     }
   }

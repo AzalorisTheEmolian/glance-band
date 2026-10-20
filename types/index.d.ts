@@ -24,8 +24,11 @@ declare module 'claude-code' {
       editingFiles: number
       /** the searches running right now (Grep, Glob), in this turn: each counted from its call to its return */
       searching: number
-      /** the questions waiting: the open "- [ ]" lines of the questions file, read, never typed */
+      /** the questions waiting in THIS session: the open "- [ ]" lines of this session's section of the questions file
+       * ("## session <id>" to "<!-- end of session <id> -->"), read, never typed */
       questions: string[]
+      /** the open lines of every other session's section, and of no section at all: counted, never listed */
+      otherQuestions: number
       /** the waiting questions unfolded under the band by the person */
       showQuestions: boolean
     }

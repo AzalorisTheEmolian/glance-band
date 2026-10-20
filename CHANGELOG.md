@@ -1,5 +1,19 @@
 # Changes
 
+## 1.2.0
+
+- **Questions per session.** All your sessions share one questions file, so a question Claude asked you in one
+  session used to be counted - and listed - in every other. Now each session's questions stand in a section of their
+  own, between `## session <id>` and `<!-- end of session <id> -->`, and the band reads "N questions waiting: this
+  session; M questions waiting: other sessions": the List shows this session's questions only.
+- The id is the session's own id, its transcript file's name: it stays when you rename the session.
+- With `teach_claude` on, the note to Claude names the session's id and its section, and asks Claude to ask you only
+  the questions of its own section; the note is sent with every request, so it holds after a compaction too (about
+  300 tokens per request, up from about 120).
+- Lines written before 1.2.0 stand outside every section and count under "other sessions"; move one into a session's
+  section to list it there. The README's data section names the session's id among what the band reads and what the
+  note sends.
+
 ## 1.1.1
 
 - **A search running is shown.** While a search Claude started runs (Grep or Glob - what Claude Code draws as

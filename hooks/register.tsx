@@ -11,8 +11,9 @@ import type { Counts, Watched } from '../types'
 // and, in brown, what Claude is still writing: "writing a command", "creating a file" ("rewriting a file" once its name
 // turns out to be a file that already exists), "editing a file" ("making N edits" for several); Hide folds the band
 // down to its Show button.
-// Row 2: "N questions waiting" - white at zero, a calm yellow from one - counted from ONE Markdown file, with a List
-// button that unfolds the open questions under it.
+// Row 2: Claude's questions still waiting for you, counted from ONE Markdown file that all your sessions share, one
+// section per session: "N questions waiting: this session; M questions waiting: other sessions" - each count white at
+// zero, a calm yellow from one - with a List button that unfolds THIS session's open questions under it.
 //
 // HOW THE COUNTS STAY TRUE. The session's own Stop event at every turn's end carries its in-flight background tasks and
 // its scheduled jobs: the whole truth, once a turn. Between turn ends the band moves live: a background launch, a
@@ -31,7 +32,8 @@ const creatingFiles = atom({ plugin: 'glance-band', key: 'creatingFiles' } as co
 const rewritingFiles = atom({ plugin: 'glance-band', key: 'rewritingFiles' } as const, 0)
 const editingFiles = atom({ plugin: 'glance-band', key: 'editingFiles' } as const, 0)
 const searching = atom({ plugin: 'glance-band', key: 'searching' } as const, 0)
-const questions =atom({ plugin: 'glance-band', key: 'questions' } as const, [])
+const questions = atom({ plugin: 'glance-band', key: 'questions' } as const, [])
+const otherQuestions = atom({ plugin: 'glance-band', key: 'otherQuestions' } as const, 0)
 const showQuestions = atom({ plugin: 'glance-band', key: 'showQuestions' } as const, false)
 
 const COMMANDS = ['Bash', 'PowerShell']
@@ -68,22 +70,75 @@ const BUTTON_GAP = 0.4
 // THE QUESTIONS FILE: every line "- [ ] ..." is a question waiting, every "- [x] ..." one answered. Its path is the
 // `questions_file` option, or <home>/.claude/questions_waiting.md; unless the `teach_claude` option is off, a short
 // section of the system prompt asks Claude to keep it (QUESTIONS_NOTE below).
-const OPEN_QUESTION = /^- \[ \] (.+)$/gm
+// ONE FILE, ONE SECTION PER SESSION (1.2.0): every session that loads the band shares the file, so each session's
+// questions stand between its own two lines, "## session <id>" and "<!-- end of session <id> -->". The id is the
+// session's own id, its transcript file's name, which $.session.id() answers: it stays when the session is renamed,
+// so a session's name is never the key. The band counts this session's open lines and every other open line apart and
+// lists this session's alone; a line outside every section (one written before 1.2.0, say) is another session's.
+const SECTION_HEAD = /^## session (\S+)\s*$/
+const SECTION_END = /^<!-- end of session (\S+) -->\s*$/
+const OPEN_LINE = /^- \[ \] (.+?)\s*$/
+const sectionHead = (id: string) => `## session ${id}`
+const sectionEnd = (id: string) => `<!-- end of session ${id} -->`
 const DEFAULT_QUESTIONS = '/.claude/questions_waiting.md'
 
 type Options = { questions_file?: string; teach_claude?: boolean }
 
 const colorOf = (c: Counts) => (c.tasks + c.crons === 0 ? 'inactive' : c.tasks === 0 && c.crons === 1 ? LILAC : 'suggestion')
 
-const QUESTIONS_NOTE = (path: string) =>
+// the note names the session's id and its section, so the rule holds after a compaction too: the system prompt is
+// sent whole with every request
+const QUESTIONS_NOTE = (path: string, id: string | null) =>
   [
     'The Glance Band plugin shows the user, above the prompt, how many of your questions wait for an answer, counted ' +
-      'from one file: ' + path + '.',
-    'Whenever you ask the user a question you need answered (a choice, a confirmation, a missing fact), add ONE line ' +
-      'to that file in the same step: "- [ ] YYYY-MM-DD HH:MM · topic · the question" (create the file if it is missing).',
+      'from one file that all of the user\'s sessions share: ' + path + '.',
+    id === null
+      ? 'Whenever you ask the user a question you need answered (a choice, a confirmation, a missing fact), add ONE ' +
+        'line to that file in the same step: "- [ ] YYYY-MM-DD HH:MM · topic · the question" (create the file if it ' +
+        'is missing).'
+      : 'The file holds one section per session. THIS SESSION\'S ID IS ' + id + ' - its transcript file\'s name, ' +
+        'which stays when the session is renamed (never use a session\'s name). This session\'s section is every line ' +
+        'between "' + sectionHead(id) + '" and "' + sectionEnd(id) + '"; if the file has no such section yet, add ' +
+        'those two lines at its end (create the file if it is missing). Whenever you ask the user a question you need ' +
+        'answered (a choice, a confirmation, a missing fact), add ONE line inside this section, above its end line, in ' +
+        'the same step: "- [ ] YYYY-MM-DD HH:MM · topic · the question".',
     'When the user answers it, or it stops mattering, change that line\'s "- [ ]" to "- [x]" and add the answer after it.',
+    id === null
+      ? ''
+      : 'Ask the user only the questions in this session\'s section: a line in another session\'s section, or outside ' +
+        'every section, belongs to another session - never ask it, tick it or edit it.',
     'Never keep a count of the questions anywhere else: the band counts the open lines itself.',
-  ].join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+const sessionId = async ($: EngineInterface): Promise<string | null> => {
+  try {
+    return String(await $.session.id()) || null
+  } catch {
+    return null
+  }
+}
+
+// each line's owner: the session whose header stands above it until its end line (both lines its own); null outside
+// every section
+const owners = (lines: string[]): (string | null)[] => {
+  let owner: string | null = null
+  return lines.map(ln => {
+    const head = SECTION_HEAD.exec(ln)
+    if (head) {
+      owner = head[1]
+      return owner
+    }
+    const end = SECTION_END.exec(ln)
+    if (end) {
+      const was = owner
+      owner = null
+      return was
+    }
+    return owner
+  })
+}
 
 // the module's own memory, reset at every load: what the shells' output files said last, whether the timer runs, and
 // the questions file's path once resolved
@@ -108,23 +163,41 @@ const resolvePath = async ($: EngineInterface, options: Options) => {
   return questionsPath
 }
 
-// read whole at every tick (a small file), the band redrawn only when the list itself changed
+// read whole at every tick (a small file), the band redrawn only when this session's list or the other sessions'
+// count changed
 const readQuestions = async ($: EngineInterface, options: Options) => {
-  let open: string[] = []
+  const mine: string[] = []
+  let others = 0
   try {
     const path = await resolvePath($, options)
     if (path) {
       const s = await $.fs.stat(path)
       if (s.size <= 1_000_000) {
-        open = [...String(await $.fs.read(path)).matchAll(OPEN_QUESTION)].map(m => m[1].trim())
+        const me = await sessionId($)
+        const lines = String(await $.fs.read(path)).split('\n')
+        const own = owners(lines)
+        lines.forEach((ln, i) => {
+          const m = OPEN_LINE.exec(ln)
+          if (!m) {
+            return
+          }
+          if (me !== null && own[i] === me) {
+            mine.push(m[1].trim())
+          } else {
+            others += 1
+          }
+        })
       }
     }
   } catch {
     // no file is no question waiting
   }
   const now = await read($, questions)
-  if (now.length !== open.length || now.some((q, i) => q !== open[i])) {
-    await update($, questions, () => open)
+  if (now.length !== mine.length || now.some((q, i) => q !== mine[i])) {
+    await update($, questions, () => mine)
+  }
+  if ((await read($, otherQuestions)) !== others) {
+    await update($, otherQuestions, () => others)
   }
 }
 
@@ -256,7 +329,8 @@ export const register: Register = (on, rawOptions) => {
     if (!path) {
       return r
     }
-    return { sections: [...r.sections, { id: `${PLUGIN}:questions`, text: QUESTIONS_NOTE(path), scope: 'session' as const }] }
+    const note = QUESTIONS_NOTE(path, await sessionId($))
+    return { sections: [...r.sections, { id: `${PLUGIN}:questions`, text: note, scope: 'session' as const }] }
   })
 
   on('classic.Stop', async ($, e, next) => {
@@ -386,15 +460,20 @@ export const register: Register = (on, rawOptions) => {
     }
 
     const qs = await read($, questions)
+    const others = await read($, otherQuestions)
     const listed = await read($, showQuestions)
-    const qLabel = qs.length === 1 ? '1 question waiting' : `${qs.length} questions waiting`
-    // a desktop paints every button's text in its own white, whatever colour a plugin gives - so the count is plain
-    // text (its number in the band's first column), white at zero and the calm yellow from one, with a short button
+    const waiting = (n: number) => (n === 1 ? '1 question waiting' : `${n} questions waiting`)
+    // a desktop paints every button's text in its own white, whatever colour a plugin gives - so the counts are plain
+    // text (the first number in the band's first column), each white at zero and the calm yellow from one, with a short
+    // button; this session's count and the other sessions' apart, in one row of their own so the row's gap stands only
+    // between the words and the button
     const toggleList = () => update($, showQuestions, s => !s)
     const counter = [
-      <Text key="qcount" color={qs.length > 0 ? GOLD : 'text'}>
-        {qLabel}
-      </Text>,
+      <Box key="qcounts" flexDirection="row">
+        <Text color={qs.length > 0 ? GOLD : 'text'}>{`${waiting(qs.length)}: this session`}</Text>
+        <Text color="text">{'; '}</Text>
+        <Text color={others > 0 ? GOLD : 'text'}>{`${waiting(others)}: other sessions`}</Text>
+      </Box>,
       <Button key="questions" label={listed ? 'Close' : 'List'} onPress={toggleList} />,
     ]
 
