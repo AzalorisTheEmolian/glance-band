@@ -5,6 +5,19 @@ questions is waiting for your answer.
 
 ![Glance Band in the session that asked: one question waiting in this session, its list open](docs/this-session-question-listed.png)
 
+## What's new
+
+**1.2.0 - questions per session.** All your sessions share one questions file, so a question Claude asked in one
+session used to be counted, and listed, in every other. Now each session keeps its questions in a section of its own,
+and the band reads "N questions waiting: this session; M questions waiting: other sessions" - the List shows only the
+questions of the session you are looking at. Claude is told which section is its own, so after a compaction too it
+asks you only its own session's questions. See [The questions file](#the-questions-file).
+
+**1.1.1** - "searching" is shown while a search Claude started (Grep or Glob) runs. **1.1.0** - what Claude is
+writing, for files too: "creating a file", "rewriting a file", "editing a file".
+
+Every version's changes: [CHANGELOG.md](CHANGELOG.md).
+
 ## What it shows
 
 **Row 1 - the work**
