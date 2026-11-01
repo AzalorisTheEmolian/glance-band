@@ -31,6 +31,10 @@ declare module 'claude-code' {
       otherQuestions: number
       /** the waiting questions unfolded under the band by the person */
       showQuestions: boolean
+      /** what this session's own file in the band_tasks folder last said, and when it was written */
+      told: { n: number; at: number }
+      /** every other session's first-row number added up from their files in the band_tasks folder, the silent ones left out */
+      otherTasks: number
     }
   }
 }

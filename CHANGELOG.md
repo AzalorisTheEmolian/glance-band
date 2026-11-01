@@ -1,5 +1,15 @@
 # Changes
 
+## 1.3.0
+
+- **Your other sessions' background tasks.** A new row directly under the first: "N Background tasks running: other
+  sessions", pink from one, grey at zero - so a glance tells you whether another session is still busy.
+- **The band now writes a small file of its own.** A plugin cannot ask another session anything, so each session's band
+  keeps one tiny file in `<home>/.claude/band_tasks`, named by the session's id and holding only that session's number of
+  tasks. The numbers never leave your computer. A file not refreshed for 30 seconds counts as a session that has ended.
+- A new setting, `other_sessions_tasks` (on by default): turned off, the row is not drawn and nothing is written or read
+  there. The README's data section says all of this.
+
 ## 1.2.0
 
 - **Questions per session.** All your sessions share one questions file, so a question Claude asked you in one

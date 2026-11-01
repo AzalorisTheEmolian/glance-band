@@ -6,7 +6,7 @@
     {
       "name": "glance-band",
       "source": "./",
-      "description": "A band above the prompt: background tasks and loops, commands and searches running, a command or a file being written, and Claude's questions waiting for you, this session's and your other sessions' apart - at a glance."
+      "description": "A band above the prompt: background tasks and loops, your other sessions' tasks too, commands and searches running, a command or a file being written, and Claude's questions waiting for you, this session's and your other sessions' apart - at a glance."
     }
   ]
 }

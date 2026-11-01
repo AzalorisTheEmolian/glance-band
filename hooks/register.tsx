@@ -11,7 +11,9 @@ import type { Counts, Watched } from '../types'
 // and, in brown, what Claude is still writing: "writing a command", "creating a file" ("rewriting a file" once its name
 // turns out to be a file that already exists), "editing a file" ("making N edits" for several); Hide folds the band
 // down to its Show button.
-// Row 2: Claude's questions still waiting for you, counted from ONE Markdown file that all your sessions share, one
+// Row 2: the background work of your OTHER sessions - "N Background tasks running: other sessions", pink from one, grey
+// at zero - so a glance says whether another session is still busy.
+// Row 3: Claude's questions still waiting for you, counted from ONE Markdown file that all your sessions share, one
 // section per session: "N questions waiting: this session; M questions waiting: other sessions" - each count white at
 // zero, a calm yellow from one - with a List button that unfolds THIS session's open questions under it.
 //
@@ -35,6 +37,8 @@ const searching = atom({ plugin: 'glance-band', key: 'searching' } as const, 0)
 const questions = atom({ plugin: 'glance-band', key: 'questions' } as const, [])
 const otherQuestions = atom({ plugin: 'glance-band', key: 'otherQuestions' } as const, 0)
 const showQuestions = atom({ plugin: 'glance-band', key: 'showQuestions' } as const, false)
+const told = atom({ plugin: 'glance-band', key: 'told' } as const, { n: 0, at: 0 })
+const otherTasks = atom({ plugin: 'glance-band', key: 'otherTasks' } as const, 0)
 
 const COMMANDS = ['Bash', 'PowerShell']
 // A SEARCH RUNNING - Grep or Glob, what Claude Code draws as "Searching <pattern>" - from its call until it returns, in
@@ -61,6 +65,7 @@ const LAUNCHED = /(?:running in background with ID: (\S+?)\.|moved to the backgr
 const LILAC = '#C8A2C8'
 const ROAST = '#9C6644'
 const GOLD = '#E5C07B'
+const PINK = '#F48FB1'
 const AMBER = 'warning'
 const HIDE = '▼'
 const SHOW = '▶'
@@ -82,7 +87,18 @@ const sectionHead = (id: string) => `## session ${id}`
 const sectionEnd = (id: string) => `<!-- end of session ${id} -->`
 const DEFAULT_QUESTIONS = '/.claude/questions_waiting.md'
 
-type Options = { questions_file?: string; teach_claude?: boolean }
+// THE OTHER SESSIONS' TASKS (1.3.0). A plugin cannot ask another session anything, so each band tells the others: it keeps
+// ONE SMALL FILE OF ITS OWN in <home>/.claude/band_tasks, named by its session's id and holding its first row's number,
+// the loops included, and every band adds up the files of the others. One file per session, because a file with one
+// writer can never lose another session's count. $.fs deletes nothing, so a session that ends leaves its last number
+// behind: while a count stands above zero its file is written again every BEAT_MS, and a file older than STALE_MS is a
+// session that has gone and is not counted. Zero is said once, and a session that never ran a task writes nothing at all.
+// The `other_sessions_tasks` option off: nothing is written or read there, and the row is not drawn.
+const DEFAULT_TASKS = '/.claude/band_tasks'
+const BEAT_MS = 10_000
+const STALE_MS = 30_000
+
+type Options = { questions_file?: string; teach_claude?: boolean; other_sessions_tasks?: boolean }
 
 const colorOf = (c: Counts) => (c.tasks + c.crons === 0 ? 'inactive' : c.tasks === 0 && c.crons === 1 ? LILAC : 'suggestion')
 
@@ -141,13 +157,19 @@ const owners = (lines: string[]): (string | null)[] => {
 }
 
 // the module's own memory, reset at every load: what the shells' output files said last, whether the timer runs, and
-// the questions file's path once resolved
+// the questions file's path and the tasks folder once resolved
 const seen = new Map<string, number>()
 let ticking = false
 let questionsPath: string | null = null
+let tasksDir: string | null = null
 const pending = new Map<string, Kind>()
 // a whole-file write's arguments as they stream in, by the block's index, until the file's name can be read from them
 const naming = new Map<number, { id: string; json: string }>()
+
+const homeFolder = async ($: EngineInterface) => {
+  const home = (await $.env.get('HOME').catch(() => undefined)) ?? (await $.env.get('USERPROFILE').catch(() => undefined))
+  return home ? home.replace(/[\\/]+$/, '') : ''
+}
 
 const resolvePath = async ($: EngineInterface, options: Options) => {
   if (questionsPath !== null) {
@@ -157,10 +179,18 @@ const resolvePath = async ($: EngineInterface, options: Options) => {
   if (chosen) {
     questionsPath = chosen
   } else {
-    const home = (await $.env.get('HOME').catch(() => undefined)) ?? (await $.env.get('USERPROFILE').catch(() => undefined))
-    questionsPath = home ? home.replace(/[\\/]+$/, '') + DEFAULT_QUESTIONS : ''
+    const home = await homeFolder($)
+    questionsPath = home ? home + DEFAULT_QUESTIONS : ''
   }
   return questionsPath
+}
+
+const resolveTasksDir = async ($: EngineInterface) => {
+  if (tasksDir === null) {
+    const home = await homeFolder($)
+    tasksDir = home ? home + DEFAULT_TASKS : ''
+  }
+  return tasksDir
 }
 
 // read whole at every tick (a small file), the band redrawn only when this session's list or the other sessions'
@@ -270,6 +300,52 @@ const drop = async ($: EngineInterface, ids: string[]) => {
   await bump($, -present.length, 0)
 }
 
+// this session's number, written only when it moved, or when it stands above zero and its file is due again
+const tellTasks = async ($: EngineInterface, options: Options) => {
+  if (options.other_sessions_tasks === false) {
+    return
+  }
+  const folder = await resolveTasksDir($)
+  const me = await sessionId($)
+  if (!folder || me === null) {
+    return
+  }
+  const c = await read($, counts)
+  const n = c === null ? 0 : c.tasks + c.crons
+  const now = await $.clock.now()
+  const was = await read($, told)
+  if (n !== was.n || (n > 0 && now - was.at >= BEAT_MS)) {
+    await $.fs.write(`${folder}/${me}.txt`, `${n}\n`)
+    await update($, told, () => ({ n, at: now }))
+  }
+}
+
+// the others' numbers added up, read whole at every tick like the questions, and the band redrawn only when the sum
+// changed; a file holding no number counts for nothing
+const readOtherTasks = async ($: EngineInterface, options: Options) => {
+  if (options.other_sessions_tasks === false) {
+    return
+  }
+  let sum = 0
+  try {
+    const folder = await resolveTasksDir($)
+    if (folder) {
+      const mine = `${await sessionId($)}.txt`
+      const now = await $.clock.now()
+      for (const f of await $.fs.list(folder)) {
+        if (f.kind === 'file' && f.name !== mine && now - f.mtimeMs < STALE_MS) {
+          sum += Number.parseInt(String(await $.fs.read(`${folder}/${f.name}`)), 10) || 0
+        }
+      }
+    }
+  } catch {
+    // no folder yet is no other session telling
+  }
+  if ((await read($, otherTasks)) !== sum) {
+    await update($, otherTasks, () => sum)
+  }
+}
+
 const poll = async ($: EngineInterface, options: Options) => {
   const gone: string[] = []
   for (const t of await read($, watch)) {
@@ -290,6 +366,8 @@ const poll = async ($: EngineInterface, options: Options) => {
     await drop($, gone)
   }
   await readQuestions($, options)
+  await tellTasks($, options).catch(() => undefined)
+  await readOtherTasks($, options)
 }
 
 const tick = ($: EngineInterface, options: Options) => {
@@ -311,6 +389,7 @@ export const register: Register = (on, rawOptions) => {
       .register({ name: 'band', description: 'Show or hide the Glance Band above the prompt', immediate: true })
       .catch(() => undefined)
     await readQuestions($, options)
+    await readOtherTasks($, options)
     tick($, options)
     return next(e)
   })
@@ -344,6 +423,8 @@ export const register: Register = (on, rawOptions) => {
     naming.clear()
     await setWriting($)
     await readQuestions($, options)
+    await tellTasks($, options).catch(() => undefined)
+    await readOtherTasks($, options)
 
     const d = await read($, dir)
     const shells = live.filter(t => t.type === 'shell').map(t => t.id)
@@ -497,15 +578,23 @@ export const register: Register = (on, rawOptions) => {
         {counter}
       </Box>
     )
+    // the other sessions' tasks, directly under the first row: pink from 1, grey at 0 like the first row's own count, so
+    // the colour alone says whether any other session has work; with the option off the row is not drawn
+    const peers = options.other_sessions_tasks === false ? null : await read($, otherTasks)
 
     // the list under the counter: one line per question, cut to the band's width, each number in the first column;
-    // never more lines than the band's own rows allow beside its two - the rest counted
+    // never more lines than the band's own rows allow beside the rows above it - the rest counted
     const width = Math.max(20, (e.props.bodyColumns ?? 80) - 4)
-    const room = Math.max(1, (e.props.maxRows ?? 10) - 2)
+    const room = Math.max(1, (e.props.maxRows ?? 10) - (peers === null ? 2 : 3))
     const shown = qs.length > room ? qs.slice(0, room - 1) : qs
     return (
       <Box flexDirection="column">
         {row}
+        {peers === null ? null : (
+          <Text color={peers > 0 ? PINK : 'inactive'}>
+            {`${peers} Background task${peers === 1 ? '' : 's'} running: other sessions`}
+          </Text>
+        )}
         {questionsRow}
         {listed && qs.length === 0 ? <Text color="inactive">{'No question waits'}</Text> : null}
         {listed

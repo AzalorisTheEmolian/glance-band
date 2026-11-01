@@ -1,8 +1,8 @@
 {
   "name": "glance-band",
   "displayName": "Glance Band",
-  "version": "1.2.0",
-  "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, commands and searches running, a command or a file being written - and how many of Claude's questions wait for your answer, in this session and in your other sessions.",
+  "version": "1.3.0",
+  "description": "A band above the prompt that tells you at a glance what Claude Code is doing - background tasks and loops, your other sessions' tasks too, commands and searches running, a command or a file being written - and how many of Claude's questions wait for your answer, in this session and in your other sessions.",
   "author": { "name": "Azaloris the Emolian", "url": "https://github.com/AzalorisTheEmolian" },
   "homepage": "https://github.com/AzalorisTheEmolian/glance-band",
   "repository": "https://github.com/AzalorisTheEmolian/glance-band",
@@ -24,6 +24,12 @@
       "type": "boolean",
       "title": "Ask Claude to keep the questions file",
       "description": "Adds a short section to the system prompt (about 300 tokens per request) naming the session's id and asking Claude to write each question it puts to you into the session's own section of the questions file, to tick it off once answered, and to ask you only its own section's questions. Turn off if you keep the file another way.",
+      "default": true
+    },
+    "other_sessions_tasks": {
+      "type": "boolean",
+      "title": "Count your other sessions' background tasks",
+      "description": "Draws the row \"N Background tasks running: other sessions\". To count them, each session's band keeps one tiny file of its own in <your home folder>/.claude/band_tasks, holding only that session's number of tasks. Turn off and the row is not drawn, and nothing is written or read there.",
       "default": true
     }
   }

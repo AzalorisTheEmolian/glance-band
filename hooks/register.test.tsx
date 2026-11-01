@@ -476,7 +476,7 @@ test('the questions list never outgrows the band: past its rows the rest are cou
   on('fs.read', async ($, e) => ({ value: isQ(e.path) ? many : '' }))
 
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
-  const small = { ...BAND, props: { ...BAND.props, maxRows: 4 } }
+  const small = { ...BAND, props: { ...BAND.props, maxRows: 5 } }
   const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...small })
   expect((await ui.find(QUESTIONS))?.text).toBe('4 questions waiting: this session')
   await ui.press({ key: 'questions' })
@@ -506,6 +506,223 @@ test('the note to Claude stays out when teach_claude is off', { options: { quest
   const r = await $.prompt.compose(FACTS as never)
   expect(r.sections.find(s => s.id === 'glance-band:questions')).toBeUndefined()
   expect(r.sections.length).toBe(1)
+})
+
+const OTHER_TASKS = { type: 'Text', text: /Background tasks? running: other sessions/ } as const
+const HOME = 'C:/glance-test/home'
+const TOLD_DIR = `${HOME}/.claude/band_tasks`
+const PINK = '#F48FB1'
+type Told = { text: string; mtimeMs: number }
+// the engine hands a hook the platform's own spelling of a path
+const slashed = (p: unknown) => String(p).replace(/\\/g, '/')
+// a band_tasks folder in memory, answering the band's three calls on it as the disk would
+const toldFolder = (on: Parameters<Parameters<typeof test>[1]>[1], disk: Map<string, Told>, now: () => number) => {
+  on('fs.write', async (_$, e) => {
+    disk.set(slashed(e.path), { text: String(e.text), mtimeMs: now() })
+    return { value: undefined }
+  })
+  on('fs.list', async (_$, e) => ({
+    value: [...disk]
+      .filter(([p]) => p.startsWith(`${slashed(e.path)}/`))
+      .map(([p, f]) => ({ name: p.slice(slashed(e.path).length + 1), kind: 'file', size: f.text.length, mtimeMs: f.mtimeMs, isLink: false })),
+  }))
+  on('fs.read', async (_$, e) => ({ value: disk.get(slashed(e.path))?.text ?? '' }))
+}
+
+// This test's session is S1: S2 and S3 are other sessions still telling, S4 has gone silent (a session that ended with
+// tasks on its count), and S1's own file is never its own "other"
+test('the other sessions\' tasks: directly under the first row, pink from 1, grey at 0, this session\'s own and a silent one left out', async ($, on) => {
+  const clock = mock.clock(on, { now: 100_000 })
+  mock.env(on, { HOME })
+  const disk = new Map<string, Told>([
+    [`${TOLD_DIR}/S1.txt`, { text: '5\n', mtimeMs: 99_000 }],
+    [`${TOLD_DIR}/S2.txt`, { text: '2\n', mtimeMs: 95_000 }],
+    [`${TOLD_DIR}/S3.txt`, { text: '1\n', mtimeMs: 99_000 }],
+    [`${TOLD_DIR}/S4.txt`, { text: '7\n', mtimeMs: 60_000 }],
+    [`${TOLD_DIR}/garbled.txt`, { text: 'not a number', mtimeMs: 99_000 }],
+  ])
+  on('session.id', async () => ({ value: 'S1' }))
+  on('classic.Stop', async () => ({}))
+  toldFolder(on, disk, clock.now)
+  const stop = () => $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [LOOP] })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    await stop()
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+    const row = await ui.find(OTHER_TASKS)
+    expect(row?.text).toBe('3 Background tasks running: other sessions')
+    expect(row?.props.color).toBe(PINK)
+    // directly under the first row, whose last piece is the Hide button's triangle, and directly above the questions
+    const texts = (await ui.findAll({ type: 'Text' })).map(x => String(x.text))
+    const at = texts.findIndex(t => /Background/.test(t))
+    expect(texts[at - 1]).toBe('▼')
+    expect(texts[at + 1]).toMatch(/waiting: this session/)
+    await ui.unmount()
+  }
+
+  // S3 goes silent, S2 keeps telling, now 1: the row's own singular, still pink
+  await clock.advance(31_000)
+  disk.set(`${TOLD_DIR}/S2.txt`, { text: '1\n', mtimeMs: clock.now() })
+  await stop()
+  let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('1 Background task running: other sessions')
+  expect((await ui.find(OTHER_TASKS))?.props.color).toBe(PINK)
+  await ui.unmount()
+
+  // S2 says 0: grey, the row stays
+  disk.set(`${TOLD_DIR}/S2.txt`, { text: '0\n', mtimeMs: clock.now() })
+  await stop()
+  ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('0 Background tasks running: other sessions')
+  expect((await ui.find(OTHER_TASKS))?.props.color).toBe('inactive')
+
+  // folded, only the button stays
+  await ui.press({ key: 'toggle' })
+  expect(await ui.find(OTHER_TASKS)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('no home folder known and no band_tasks folder yet read as 0, grey, write nothing and take nothing else down', async ($, on) => {
+  mock.clock(on, { now: 100_000 })
+  const writes: string[] = []
+  on('classic.Stop', async () => ({}))
+  on('session.id', async () => ({ value: 'S1' }))
+  on('fs.write', async (_$, e) => {
+    writes.push(slashed(e.path))
+    return { value: undefined }
+  })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [SHELL], session_crons: [] })
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('0 Background tasks running: other sessions')
+  expect((await ui.find(OTHER_TASKS))?.props.color).toBe('inactive')
+  expect((await ui.find(COUNT))?.text).toBe('1 background task running')
+  expect(writes).toEqual([])
+  await ui.unmount()
+})
+
+test('the folder is found under USERPROFILE too', async ($, on) => {
+  mock.clock(on, { now: 100_000 })
+  const writes: string[] = []
+  mock.env(on, { USERPROFILE: 'C:\\glance-test\\home\\' })
+  on('session.id', async () => ({ value: 'S1' }))
+  on('classic.Stop', async () => ({}))
+  on('fs.write', async (_$, e) => {
+    writes.push(slashed(e.path))
+    return { value: undefined }
+  })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [SHELL], session_crons: [] })
+  expect(writes).toEqual([`${TOLD_DIR}/S1.txt`])
+})
+
+test('this session\'s own file: nothing before a first task, written when its number moves, again every ten seconds, 0 said once', async ($, on) => {
+  const clock = mock.clock(on, { now: 500_000 })
+  mock.env(on, { HOME })
+  const writes: string[] = []
+  on('session.id', async () => ({ value: 'S1' }))
+  on('classic.Stop', async () => ({}))
+  on('fs.write', async (_$, e) => {
+    writes.push(`${slashed(e.path)} ${JSON.stringify(e.text)} @${clock.now()}`)
+    return { value: undefined }
+  })
+  const stop = (tasks: unknown[], crons: unknown[]) =>
+    $.classic.Stop({ stop_hook_active: false, background_tasks: tasks, session_crons: crons } as never)
+  const FILE = `${TOLD_DIR}/S1.txt`
+
+  // a session that never ran a task leaves no file
+  await stop([], [])
+  await stop([], [])
+  await clock.advance(30_000)
+  await stop([], [])
+  expect(writes).toEqual([])
+
+  // the number moves: told at once, the loop counted as the first row counts it
+  await stop([SHELL], [LOOP])
+  expect(writes).toEqual([`${FILE} "2\\n" @530000`])
+
+  // unmoved inside the beat: nothing; past it: told again, so the others can tell it from a session that ended
+  await clock.advance(9_999)
+  await stop([SHELL], [LOOP])
+  expect(writes.length).toBe(1)
+  await clock.advance(1)
+  await stop([SHELL], [LOOP])
+  expect(writes.length).toBe(2)
+  expect(writes[1]).toBe(`${FILE} "2\\n" @540000`)
+
+  // the shell moved the timer to work: from here the tick alone beats, with no turn ending
+  await clock.advance(10_000)
+  expect(writes.length).toBe(3)
+  await clock.advance(10_000)
+  expect(writes.length).toBe(4)
+
+  // back to 0: said once, then silence
+  await stop([], [])
+  expect(writes.length).toBe(5)
+  expect(writes[4]).toMatch(/S1\.txt "0\\n" @/)
+  await clock.advance(60_000)
+  await stop([], [])
+  expect(writes.length).toBe(5)
+})
+
+test('one band\'s file as it writes it is what another band reads, and the session gone silent leaves the row', async ($, on) => {
+  const clock = mock.clock(on, { now: 100_000 })
+  mock.env(on, { HOME })
+  const disk = new Map<string, Told>()
+  let me = 'S1'
+  on('session.id', async () => ({ value: me }))
+  on('classic.Stop', async () => ({}))
+  toldFolder(on, disk, clock.now)
+
+  // S1 runs a shell and a loop and tells it
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [SHELL], session_crons: [LOOP] })
+  let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  // its own number is never its own "other"
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('0 Background tasks running: other sessions')
+  await ui.unmount()
+
+  // the same band answering as S2, with nothing of its own running: S1's 2 is an other session's
+  me = 'S2'
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+  ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('2 Background tasks running: other sessions')
+  expect((await ui.find(OTHER_TASKS))?.props.color).toBe(PINK)
+  expect((await ui.find(COUNT))?.text).toBe('0 background tasks running')
+  await ui.unmount()
+
+  // S1 says no more: at 29 seconds still counted, at 30 gone - the last moved by the tick alone, no turn ending (an idle
+  // session's row must move too; the 2-second tick stands at an even second, so the clock goes to 31 and stays there)
+  await clock.advance(29_000)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+  ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('2 Background tasks running: other sessions')
+  await ui.unmount()
+  await clock.advance(3_000)
+  ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect((await ui.find(OTHER_TASKS))?.text).toBe('0 Background tasks running: other sessions')
+  expect((await ui.find(OTHER_TASKS))?.props.color).toBe('inactive')
+  await ui.unmount()
+})
+
+test('with other_sessions_tasks off nothing is written or read there and the row is not drawn', { options: { other_sessions_tasks: false } }, async ($, on) => {
+  const clock = mock.clock(on, { now: 100_000 })
+  mock.env(on, { HOME })
+  const asked: string[] = []
+  on('session.id', async () => ({ value: 'S1' }))
+  on('classic.Stop', async () => ({}))
+  on('fs.write', async (_$, e) => {
+    asked.push(`write ${slashed(e.path)}`)
+    return { value: undefined }
+  })
+  on('fs.list', async (_$, e) => {
+    asked.push(`list ${slashed(e.path)}`)
+    return { value: [] }
+  })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [SHELL], session_crons: [LOOP] })
+  await clock.advance(20_000)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+  expect(await ui.find(OTHER_TASKS)).toBeUndefined()
+  expect((await ui.find(COUNT))?.text).toBe('2 background tasks running')
+  expect(asked).toEqual([])
+  await ui.unmount()
 })
 
 test('nothing drawn before the first turn ends, nor over a survey', async ($, on) => {
